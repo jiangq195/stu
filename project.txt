@@ -1,0 +1,253 @@
+回顾 休息
+1.在根目录配置首页  修改首页静态文件路径
+
+url(r'^$',views.index),
+
+def index(request):
+    return render(request,'index.html')
+
+
+开发文档
+标题
+项目介绍
+开发人员(组织架构)
+目录
+运行环境 
+需求功能简介
+   买家
+      注册
+      登录
+      商品加入购物车
+      下单
+      支付
+   卖家
+      添加商品
+      编辑商品
+      上下架
+      发货收款
+   管理员
+      添加员工
+      管理信息
+      配置权限
+项目代码模块介绍
+普通用户信息模块 users('/users/')
+卖家           sale
+管理员
+商品信息模块     goods('/goods/’）
+购物车          cart('/cart/')
+验证码          ....
+订单            ...
+
+详细设计
+
+规范
+......
+
+
+
+项目：
+1.用户users部分功能
+通过django内置模块实现用户登录注册等功能
+  首先删除自定义Users
+  删除models中的类 生成迁移文件同步到数据库
+  删除和自定义Users相关的forms.py 在views.py中删除引用
+
+想要使用自定义User需要在settings中添加属性
+AUTH_USER_MODEL = 'users.User'
+值为应用名.模型名
+
+ValueError: The field admin.LogEntry.user was declared with a lazy reference to 'users.user', but app 'users' isn't installed
+需要删除旧的迁移文件 生成新的迁移文件 回滚 
+python3 manage.py makemigrations
+python3 manage.py migrate --fake users zero
+python3 manage.py migrate
+
+django.db.utils.InternalError: (1050, "Table 'django_admin_log' already exists")
+原有的数据库中有django_admin_log，和用户部分内容无关，可以无视
+
+去数据库中查看users_user
+
+为自定义User()添加字段
+手机号 phone 
+性别  
+用户类型  数字      (1,管理员) (2,买家) 
+是否禁用用户  boolean
+def __str__
+
+class Meta:
+
+from django.contrib.auth.models import AbstractUser
+# Create your views here.
+#自定义用户类型
+#创建时显示的是后面的字符串，传递值时使用的是前面的数字
+USERTYPE = (
+    (0,'管理员'),
+    (1,'卖家'),
+    (2,'买家')
+)
+GENDER = (
+    ('1','男'),
+    ('0','女')
+)
+class User(AbstractUser):
+    nickname = models.CharField('昵称',max_length=30,null=True,blank=True)
+    phone = models.CharField('手机号',max_length=30,null=False,unique=True)
+    gender = models.CharField('性别',max_length=10,null=True,blank=True,choices=GENDER,default='1')
+    is_delete = models.BooleanField('是否禁用',default=False)
+    usertype = models.IntegerField('用户类型',choices=USERTYPE,default=2)
+    def __str__(self):
+        return self.username
+
+python3 manage.py makemigrations
+django.db.utils.InternalError: (1050, "Table 'django_admin_log' already exists")
+因为迁移文件0001中需要新建表django_admin_log，但是数据库中已存在一个原有的表
+将原有表删除
+mysql>drop table django_admin_log;
+回到终端重新运行
+python3 manage.py migrate
+
+
+实现注册功能
+url(r'^register/$',views.register,name='register'),
+定义视图函数register 
+from django.contrib.auth import hashers #用户密码加密
+from django.db import utils
+
+def register(request):
+    # 如果是GET请求返回register页面
+    if request.method == 'GET':
+        return render(request,'users/register.html')
+    else:
+    # 如果是POST请求处理登录业务逻辑
+    #获取所有的提交内容
+        username = request.POST.get('uname','')
+        password = request.POST.get('upwd','')
+        password2 = request.POST.get('upwdconfirm','')
+        email = request.POST.get('email','')
+        phone = request.POST.get('phone','')
+        #做验证判断
+        #验证用户是否注册过
+        olduser = User.objects.filter(username=username)
+        if olduser:
+            return HttpResponse('该用户已存在!')
+        #验证两次密码是否一致
+        if password != password2:
+            return HttpResponse('两次密码不一致')
+        #判断是否有未填写信息
+        if not (username and password and email and phone):
+            return HttpResponse('输入内容不能为空')
+
+        #注册用户业务
+        #密码加密
+        password_sha1 = hashers.make_password(password,None,'pbkdf2_sha1')
+        #将用户提交的数据保存到数据库完成注册
+        try:
+            User.objects.create(username=username,nickname=username,password=password_sha1,phone=phone,email=email)
+            print('注册用户：',username,'成功')
+        #导入数据库报错的对象
+        # from django.db import utils
+        except utils.DatabaseError as e:
+            print('用户注册失败','原因：',e)
+            return HttpResponse('注册失败 数据库报错')
+        return HttpResponse('注册成功 <a href="/">返回首页</a>')
+
+
+修改页面中的提交按钮为 type='submit'
+
+
+登录页
+ login.html 52 添加name
+ <input placeholder="请输入验证码" name="verify" type="text" class="verification_input">
+url(r'^login/$',views.login,name='login'),
+如果是get请求
+判断用户是否登陆过
+  如果登陆过跳到首页
+  如果没有 返回登录页面
+if request.method == 'GET':
+    return render(request,'users/login.html')
+else:
+        user_verify = request.POST.get('verify').lower()
+        verify_code = request.session['verifycode'].lower()
+        if user_verify != verify_code:
+            return HttpResponse('验证码错误')
+        username = request.POST.get('username','')
+        password = request.POST.get('password','')
+        if not username or not password:
+            return HttpResponse('用户名或密码不能为空')
+        user = auth.authenticate(request=request,username=username,password=password)
+        if user and user.is_active:
+            auth.login(request,user)
+            print('user:'+user.username+'is login!')
+            return redirect('/')
+        else:
+            return HttpResponse('登录失败')
+
+修改 首页模板 33行
+{% if request.user %}
+  <li id ='my_login'>欢迎您：{{ request.user.username }}<a href="/users/logout" >注销</a></li>
+{% else %}
+  <li id ='my_login'><a href="/users/login" >登录</a></li>
+{% endif %}
+
+
+
+注销登录功能
+配置url /users/logout
+url(r'^logout/$',views.logout,name='logout'),
+编写视图函数
+def logout(request):
+    if request.method == 'GET':
+        auth.logout(request)
+        return redirect('/')
+
+{% if request.user.username %}
+  <li id ='my_login'>欢迎您：{{ request.user.username }}<a href="/users/logout" >注销</a></li>
+{% else %}
+  <li id ='my_login'><a href="/users/login" >登录</a></li>
+{% endif %}
+
+修改密码业务
+配置路由函数users/modpwd
+配置视图函数modpwd
+url(r'^modpwd/$',views.modpwd,name='modpwd')
+修改模板
+<form action="/users/modpwd/" method="post">
+                {% csrf_token %}
+                <div class="new_password">
+                    <span class="word">输入旧密码：</span>
+                    <input required type="password" minlength="6" maxlength="12" name="upwd" id="upwd" />
+                    <span class="change_hint"></span>
+                </div>
+                <div class="new_password">
+                    <span class="word">输入新密码：</span>
+                    <input required type="password" minlength="6" maxlength="12" name="npwd" id="npwd" />
+                    <span class="change_hint"></span>
+                </div>
+                <div class="confirm_password">
+                    <span class="word">确认新密码：</span>
+                    <input required type="password" minlength="6" maxlength="12" name="rpwd" id="rpwd" />
+                    <span class="confirm_hint"></span>
+                </div>
+                <button class="save_password">
+                    保存更改
+                </button>
+</form>
+def modpwd(request):
+      if request.method == 'GET':
+        return render(request,'users/personal_password.html')
+    else:
+        upwd = request.POST.get('upwd','')
+        npwd = request.POST.get('npwd','')
+        rpwd = request.POST.get('rpwd','')
+        user = request.user
+        if user.check_password(upwd):
+            if not npwd:
+                return HttpResponse('新密码不能为空')
+            if npwd != rpwd:
+                return HttpResponse('两次密码不一致')
+            user.set_password(npwd)
+            user.save()
+            return redirect('/')
+        else:
+            msg = '密码错误'
+            return render(request,'personal_password',locals())
